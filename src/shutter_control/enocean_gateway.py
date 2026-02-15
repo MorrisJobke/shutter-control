@@ -225,19 +225,24 @@ class EnOceanGateway:
             self._handle_rps_status(sender_id, packet)
         elif packet.rorg == RORG.BS4:
             # 4BS response (less common for FSB61NP status)
-            logger.debug("Received 4BS from %s: %s", sender_id, packet.data.hex())
+            logger.debug("Received 4BS from %s: %s", sender_id, bytes(packet.data).hex())
         else:
             logger.debug(
                 "Received RORG 0x%02x from %s", packet.rorg, sender_id
             )
 
     def _handle_rps_status(self, sender_id: str, packet: RadioPacket) -> None:
-        """Parse RPS (F6-02-02) status telegram from FSB61NP.
+        """Parse RPS status telegram from actuators and wall buttons.
 
-        The device sends rocker switch telegrams:
-        - Rocker action with value 0 = moving up (opening)
-        - Rocker action with value 1 = moving down (closing)
-        - No action (release) = stopped
+        Standard F6-02-02 rocker switches (wall buttons) encode the
+        rocker channel in the upper 3 bits of DB0:
+          0 (AI) / 2 (BI) = up/open
+          1 (AO) / 3 (BO) = down/close
+
+        Eltako FSB61NP actuators use a proprietary encoding where the
+        direction is in the low bits of DB0:
+          0x02 = up/open, 0x01 = down/close
+        (rocker value is always 0 in this case)
         """
         if len(packet.data) < 2:
             return
@@ -250,12 +255,19 @@ class EnOceanGateway:
         nu_bit = (raw_status >> 4) & 0x01
 
         if nu_bit:
-            # Button action: extract rocker value from upper nibble of data
             rocker_value = (status_byte >> 5) & 0x07
-            if rocker_value == 0:
-                direction = Direction.UP
-            elif rocker_value == 1:
+
+            if rocker_value in (1, 3):
+                # Standard AO or BO = down/close
                 direction = Direction.DOWN
+            elif rocker_value in (0, 2):
+                # Standard AI or BI = up/open, BUT for Eltako actuators
+                # rocker_value is always 0 and the direction is in the
+                # low bits: 0x01 = down, 0x02 = up.
+                if rocker_value == 0 and (status_byte & 0x0F) == 0x01:
+                    direction = Direction.DOWN
+                else:
+                    direction = Direction.UP
             else:
                 direction = None
 

@@ -40,10 +40,22 @@ class ShutterConfig:
 
 
 @dataclass
+class ButtonConfig:
+    id: str
+    shutters: list[str]
+
+    @property
+    def safe_id(self) -> str:
+        """Return ID suitable for lookups (upper-case, with colons)."""
+        return self.id.upper()
+
+
+@dataclass
 class AppConfig:
     enocean: EnOceanConfig = field(default_factory=EnOceanConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     shutters: list[ShutterConfig] = field(default_factory=list)
+    buttons: list[ButtonConfig] = field(default_factory=list)
     position_file: str = "positions.json"
 
 
@@ -65,9 +77,14 @@ def load_config(path: str | Path) -> AppConfig:
     if not shutters:
         raise ValueError("No shutters defined in config")
 
+    buttons = []
+    for b in raw.get("buttons", []):
+        buttons.append(ButtonConfig(**b))
+
     return AppConfig(
         enocean=enocean_cfg,
         mqtt=mqtt_cfg,
         shutters=shutters,
+        buttons=buttons,
         position_file=raw.get("position_file", "positions.json"),
     )
