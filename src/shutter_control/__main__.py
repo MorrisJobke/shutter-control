@@ -116,12 +116,47 @@ def _handle_enocean_status(
     # Check if this is a known wall button
     shutter_ids = _button_to_shutters.get(sender)
     if shutter_ids:
-        logger.info("Button %s pressed, updating %d shutter(s)", sender, len(shutter_ids))
-        for sid in shutter_ids:
-            _apply_status_to_shutter(sid, event, tracker)
+        _handle_button_event(shutter_ids, event, tracker)
         return
 
     logger.debug("Ignoring status from unknown device %s", event.sender_id)
+
+
+def _handle_button_event(
+    shutter_ids: list[str],
+    event: StatusEvent,
+    tracker: PositionTracker,
+) -> None:
+    """Handle a wall button press for associated shutters.
+
+    Wall buttons are momentary switches — the release does not stop the motor.
+    The actuator uses toggle logic:
+      - If stopped: start moving in the pressed direction
+      - If already moving in same direction: stop
+      - If moving in opposite direction: reverse
+    """
+    if event.stopped or event.direction is None:
+        # Momentary release — ignore, the actuator keeps running
+        return
+
+    pressed_motion = (
+        MotionState.OPENING if event.direction == Direction.UP else MotionState.CLOSING
+    )
+
+    for sid in shutter_ids:
+        state = tracker.get_state(sid)
+        if not state:
+            continue
+
+        if state.motion == MotionState.STOPPED:
+            logger.info("Button → %s shutter %s", pressed_motion.name, sid)
+            tracker.start_moving(sid, pressed_motion)
+        elif state.motion == pressed_motion:
+            logger.info("Button → STOP shutter %s (same direction toggle)", sid)
+            tracker.stop(sid)
+        else:
+            logger.info("Button → reverse shutter %s to %s", sid, pressed_motion.name)
+            tracker.start_moving(sid, pressed_motion)
 
 
 def _apply_status_to_shutter(
