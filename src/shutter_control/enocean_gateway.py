@@ -21,6 +21,7 @@ Status telegrams from the device use RPS (RORG 0xF6):
 
 import logging
 import threading
+import time
 from enum import IntEnum
 from typing import Callable
 
@@ -70,12 +71,22 @@ class EnOceanGateway:
         self._communicator = SerialCommunicator(port=self._port)
         self._communicator.start()
 
-        # Wait for the base ID to be read from the dongle
-        self._base_id = self._communicator.base_id
+        # Wait for the communicator to read the base ID from the dongle
+        for attempt in range(10):
+            time.sleep(0.5)
+            if not self._communicator.is_alive():
+                raise RuntimeError(
+                    f"EnOcean communicator died — is another process using {self._port}? "
+                    "Check if the HA EnOcean integration is active."
+                )
+            self._base_id = self._communicator.base_id
+            if self._base_id:
+                break
+
         if self._base_id:
             logger.info("EnOcean base ID: %s", _format_id(self._base_id))
         else:
-            logger.warning("Could not read EnOcean base ID yet, will retry")
+            raise RuntimeError("Could not read EnOcean base ID after 5 seconds")
 
         self._running = True
         self._receive_thread = threading.Thread(

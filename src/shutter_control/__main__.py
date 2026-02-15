@@ -4,7 +4,11 @@ import asyncio
 import logging
 import signal
 import sys
+import warnings
 from pathlib import Path
+
+from bs4 import XMLParsedAsHTMLWarning
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 from .config import ShutterConfig, load_config
 from .enocean_gateway import Direction, EnOceanGateway, StatusEvent
