@@ -1,0 +1,2 @@
+[console_scripts]
+shutter-control = shutter_control.__main__:main

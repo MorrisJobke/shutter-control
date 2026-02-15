@@ -1,0 +1,20 @@
+enocean:
+  port: /dev/ttyUSB0           # Serial port of EnOcean USB 300 gateway
+
+mqtt:
+  host: 192.168.1.100
+  port: 1883
+  username: ""                  # optional
+  password: ""                  # optional
+  base_topic: enocean           # prefix for all MQTT topics
+
+shutters:
+  - id: "05:12:34:56"          # EnOcean device ID of the FSB61NP actuator
+    name: "Living Room"
+    full_close_time: 25         # seconds from fully open to fully closed
+    full_open_time: 23          # seconds from fully closed to fully open
+
+  - id: "05:12:34:57"
+    name: "Bedroom"
+    full_close_time: 25
+    full_open_time: 23
