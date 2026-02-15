@@ -20,3 +20,20 @@ shutters:
     name: "Bedroom"
     full_close_time: 25
     full_open_time: 23
+
+# ── Teach-in (pairing) ──────────────────────────────────────────────
+#
+# Each FSB61NP-230V must be paired with the USB 300 gateway before it
+# will respond to commands. Do this once per actuator:
+#
+#   1. On the FSB61NP, turn the upper rotary switch to "LRN".
+#      The LED starts blinking (you have about 1 minute).
+#   2. Send a teach-in telegram via MQTT:
+#        Topic:   enocean/cover/<safe_id>/teach_in
+#        Payload: 1
+#      (safe_id = the device ID without colons, e.g. "05123456")
+#      You can use HA Developer Tools > Services > MQTT: Publish.
+#   3. The actuator confirms by turning the LED off.
+#   4. Turn the upper rotary switch back to the desired mode (e.g. "GS1").
+#
+# Repeat for each shutter you want to control.

@@ -27,7 +27,7 @@ from typing import Callable
 
 from enocean.communicators import SerialCommunicator
 from enocean.protocol.constants import PACKET, RORG
-from enocean.protocol.packet import RadioPacket
+from enocean.protocol.packet import Packet, RadioPacket
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,36 @@ class EnOceanGateway:
         if self._communicator:
             self._communicator.stop()
 
+    def send_teach_in(self, destination: list[int]) -> None:
+        """Send a teach-in telegram to pair with an FSB61NP actuator.
+
+        The actuator must be in learn mode (LED blinking) when this is sent.
+        """
+        if not self._communicator or not self._base_id:
+            logger.error("Cannot send teach-in: communicator not ready")
+            return
+
+        sender = self._base_id
+        packet = Packet(packet_type=PACKET.RADIO)
+        packet.data = bytearray([
+            RORG.BS4,       # RORG
+            0xFF,           # DB3
+            0xF8,           # DB2
+            0x0D,           # DB1
+            0x80,           # DB0: teach-in bit cleared
+            sender[0], sender[1], sender[2], sender[3],
+            0x30,           # status
+        ])
+        packet.optional = bytearray([
+            0x03,
+            destination[0], destination[1], destination[2], destination[3],
+            0xFF,
+            0x00,
+        ])
+
+        logger.info("Sending TEACH-IN to %s", _format_id(destination))
+        self._communicator.send(packet)
+
     def send_command(
         self, destination: list[int], direction: Direction, time_sec: float = 0
     ) -> None:
@@ -127,32 +157,40 @@ class EnOceanGateway:
         time_msb = (time_val >> 8) & 0xFF
         time_lsb = time_val & 0xFF
 
-        # DB1: direction bits
+        # DB1: direction bits (Eltako: 0x01 = down/close, 0x02 = up/open)
         if direction == Direction.UP:
-            db1 = 0x01
-        elif direction == Direction.DOWN:
             db1 = 0x02
+        elif direction == Direction.DOWN:
+            db1 = 0x01
         else:
             db1 = 0x00
 
         # DB0: 0x08 = normal command (teach-in bit set = no teach-in)
         db0 = 0x08
 
-        packet = RadioPacket.create(
-            rorg=RORG.BS4,
-            rorg_func=0x3F,
-            rorg_type=0x7F,
-            destination=destination,
-            sender=self._base_id,
-            learn=False,
-        )
-
-        # Overwrite data bytes with Eltako FSB61 command format
-        # packet.data layout: [RORG, DB3, DB2, DB1, DB0, sender..., status]
-        packet.data[1] = time_msb   # DB3: time MSB
-        packet.data[2] = time_lsb   # DB2: time LSB
-        packet.data[3] = db1        # DB1: direction
-        packet.data[4] = db0        # DB0: flags
+        # Build raw 4BS radio packet — we can't use RadioPacket.create()
+        # because the Eltako FSB61 EEP is proprietary and not in the library.
+        #
+        # ESP3 Radio packet structure:
+        #   data:     [RORG, DB3, DB2, DB1, DB0, sender(4), status]
+        #   optional: [sub_tel, dest(4), dBm, security]
+        sender = self._base_id
+        packet = Packet(packet_type=PACKET.RADIO)
+        packet.data = bytearray([
+            RORG.BS4,       # RORG
+            time_msb,       # DB3: time MSB
+            time_lsb,       # DB2: time LSB
+            db1,            # DB1: direction
+            db0,            # DB0: flags
+            sender[0], sender[1], sender[2], sender[3],
+            0x30,           # status (T21 + NU)
+        ])
+        packet.optional = bytearray([
+            0x03,           # sub_tel_num: 3 (send)
+            destination[0], destination[1], destination[2], destination[3],
+            0xFF,           # dBm (max)
+            0x00,           # security level
+        ])
 
         logger.info(
             "Sending %s to %s (time=%.1fs, raw=%02x %02x %02x %02x)",

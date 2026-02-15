@@ -18,6 +18,7 @@ class MqttHandler:
         self._client: mqtt.Client | None = None
         self._on_command: Callable[[str, str], None] | None = None
         self._on_set_position: Callable[[str, int], None] | None = None
+        self._on_teach_in: Callable[[str], None] | None = None
 
     def set_command_callback(self, callback: Callable[[str, str], None]) -> None:
         """Set callback for OPEN/CLOSE/STOP commands. Args: (shutter_safe_id, command)."""
@@ -26,6 +27,10 @@ class MqttHandler:
     def set_position_callback(self, callback: Callable[[str, int], None]) -> None:
         """Set callback for set_position commands. Args: (shutter_safe_id, position 0-100)."""
         self._on_set_position = callback
+
+    def set_teach_in_callback(self, callback: Callable[[str], None]) -> None:
+        """Set callback for teach-in requests. Args: (shutter_safe_id,)."""
+        self._on_teach_in = callback
 
     def start(self) -> None:
         base = self._config.base_topic
@@ -99,6 +104,7 @@ class MqttHandler:
             sid = shutter.safe_id
             client.subscribe(f"{base}/cover/{sid}/set")
             client.subscribe(f"{base}/cover/{sid}/set_position")
+            client.subscribe(f"{base}/cover/{sid}/teach_in")
 
         # Publish HA discovery configs and mark available
         for shutter in self._shutters.values():
@@ -133,6 +139,11 @@ class MqttHandler:
                 self._on_command(safe_id, command)
             else:
                 logger.warning("Unknown command: %s", payload)
+
+        elif action == "teach_in" and self._on_teach_in:
+            logger.info("Teach-in requested for %s", safe_id)
+            self._on_teach_in(safe_id)
+            return
 
         elif action == "set_position" and self._on_set_position:
             try:

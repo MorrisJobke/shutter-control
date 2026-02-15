@@ -116,6 +116,14 @@ def _handle_enocean_status(
         tracker.start_moving(safe_id, MotionState.CLOSING)
 
 
+def _handle_teach_in(safe_id: str, gateway: EnOceanGateway) -> None:
+    """Send teach-in telegram for a shutter."""
+    shutter = _shutters_by_safe_id.get(safe_id)
+    if not shutter:
+        return
+    gateway.send_teach_in(shutter.device_id)
+
+
 def _handle_position_update(
     safe_id: str,
     state: ShutterState,
@@ -179,6 +187,9 @@ async def _run(config_path: str) -> None:
     )
     mqtt_handler.set_position_callback(
         lambda sid, pos: _handle_set_position(sid, pos, gateway, tracker)
+    )
+    mqtt_handler.set_teach_in_callback(
+        lambda sid: _handle_teach_in(sid, gateway)
     )
     tracker.set_update_callback(
         lambda sid, state: _handle_position_update(sid, state, mqtt_handler)
