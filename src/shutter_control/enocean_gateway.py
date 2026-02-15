@@ -224,8 +224,7 @@ class EnOceanGateway:
             # RPS telegram from FSB61NP: rocker switch status
             self._handle_rps_status(sender_id, packet)
         elif packet.rorg == RORG.BS4:
-            # 4BS response (less common for FSB61NP status)
-            logger.debug("Received 4BS from %s: %s", sender_id, bytes(packet.data).hex())
+            self._handle_4bs_status(sender_id, packet)
         else:
             logger.debug(
                 "Received RORG 0x%02x from %s", packet.rorg, sender_id
@@ -277,6 +276,29 @@ class EnOceanGateway:
             event = StatusEvent(sender_id, direction=None, stopped=True)
 
         logger.debug("Status from %s: %s", sender_id, event)
+        if self._on_status:
+            self._on_status(event)
+
+    def _handle_4bs_status(self, sender_id: str, packet: RadioPacket) -> None:
+        """Parse 4BS status telegram from FSB61NP.
+
+        The actuator sends a 4BS telegram when it stops, reporting the
+        elapsed run time and direction.  DB0 bit 3 (teach-in bit) is set
+        for normal data telegrams and cleared for teach-in requests.
+        """
+        if len(packet.data) < 5:
+            return
+
+        db0 = packet.data[4]
+
+        # Ignore teach-in telegrams (bit 3 cleared)
+        if not (db0 & 0x08):
+            logger.debug("4BS teach-in from %s, ignoring", sender_id)
+            return
+
+        # Actuator stopped — report as a stop event
+        event = StatusEvent(sender_id, direction=None, stopped=True)
+        logger.debug("4BS stop from %s: %s", sender_id, bytes(packet.data).hex())
         if self._on_status:
             self._on_status(event)
 
