@@ -9,7 +9,9 @@ mqtt:
   base_topic: enocean           # prefix for all MQTT topics
 
 shutters:
-  - id: "05:12:34:56"          # EnOcean device ID of the FSB61NP actuator
+  # ID: decimal number printed on device label, converted to hex.
+  # Example: label reads "1234567" -> printf "%08X" 1234567 -> 0012D687 -> "00:12:D6:87"
+  - id: "05:12:34:56"          # EnOcean device ID (hex, colon-separated)
     name: "Living Room"
     full_close_time: 25         # seconds from fully open to fully closed
     full_open_time: 23          # seconds from fully closed to fully open
