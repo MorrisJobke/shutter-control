@@ -1,0 +1,181 @@
+# Shutter Control
+
+EnOcean-to-MQTT bridge for **Eltako FSB61NP-230V** roller shutter actuators, designed to run as a Docker container on Home Assistant OS.
+
+## Features
+
+- Control Eltako FSB61NP shutters from Home Assistant via MQTT
+- Home Assistant auto-discovery (no manual HA configuration needed)
+- Time-based position tracking with persistence across restarts
+- Physical wall button support — keeps HA in sync when shutters are controlled via room buttons
+- Unique sender addressing — each actuator gets its own sender ID so commands don't cross-trigger
+- Teach-in support via MQTT
+
+## Requirements
+
+- **EnOcean USB 300** gateway (or compatible transceiver)
+- **Eltako FSB61NP-230V** actuators
+- **MQTT broker** (e.g. Mosquitto, typically included with Home Assistant)
+- **Docker** (for deployment on Home Assistant OS)
+- Python 3.11+ (for local development)
+
+## Quick Start
+
+1. Copy and edit the configuration:
+
+   ```bash
+   cp config.example.yaml config.yaml
+   ```
+
+2. Add your shutter IDs. The decimal number on the device label needs to be converted to hex:
+
+   ```bash
+   printf "%02X:%02X:%02X:%02X\n" $(( NUM >> 24 & 0xFF )) $(( NUM >> 16 & 0xFF )) $(( NUM >> 8 & 0xFF )) $(( NUM & 0xFF ))
+   ```
+
+3. Deploy to Home Assistant OS:
+
+   ```bash
+   ./deploy.sh <haos-ip>
+   ```
+
+4. Teach-in each actuator (see [Teach-in](#teach-in) below).
+
+## Configuration
+
+See [`config.example.yaml`](config.example.yaml) for a fully commented example.
+
+```yaml
+enocean:
+  port: /dev/ttyUSB0
+
+mqtt:
+  host: 192.168.1.100
+  port: 1883
+  username: ""
+  password: ""
+  base_topic: enocean
+
+shutters:
+  - id: "05:12:34:56"
+    name: "Living Room"
+    full_close_time: 25       # seconds, fully open -> fully closed
+    full_open_time: 23        # seconds, fully closed -> fully open
+
+buttons:
+  - id: "FE:12:34:56"        # EnOcean ID of the wall button
+    shutters:
+      - "05:12:34:56"
+```
+
+### Shutters
+
+| Field | Description |
+|---|---|
+| `id` | EnOcean device ID (hex, colon-separated) |
+| `name` | Display name in Home Assistant |
+| `full_close_time` | Seconds from fully open to fully closed |
+| `full_open_time` | Seconds from fully closed to fully open |
+| `sender_offset` | Optional override for the sender address offset (0-127) |
+
+### Buttons
+
+Physical wall buttons (e.g. Eltako FT55) that directly control shutters via EnOcean radio. The bridge listens for their telegrams and updates position tracking so Home Assistant stays in sync.
+
+A single button can control multiple shutters (e.g. all shutters in a room). Buttons use momentary toggle logic: pressing the same direction again stops the shutter, pressing the opposite direction reverses it.
+
+| Field | Description |
+|---|---|
+| `id` | EnOcean ID of the wall button |
+| `shutters` | List of shutter IDs this button controls |
+
+## Teach-in
+
+Each FSB61NP must be paired with the USB 300 gateway before it will respond to commands. Each actuator is taught with a unique sender address derived from its device ID, so commands only reach the intended actuator.
+
+1. On the FSB61NP, turn the upper rotary switch to **LRN**. The LED starts blinking (~1 minute window).
+2. Send a teach-in telegram via MQTT:
+   - **Topic:** `enocean/cover/<safe_id>/teach_in`
+   - **Payload:** `1`
+   - `safe_id` is the device ID without colons, e.g. `05123456`
+   - You can use HA Developer Tools > Services > MQTT: Publish.
+3. The actuator confirms by turning the LED off.
+4. Turn the upper rotary switch back to the desired mode (e.g. **GS1**).
+
+Repeat for each shutter.
+
+## Sender Offset and Collision Detection
+
+The Eltako FSB61NP only checks the **sender ID** of incoming commands, not the destination address. If all actuators were taught with the same sender, every command would trigger every actuator.
+
+To prevent this, each shutter automatically gets a unique sender address: `base_id + (last_byte_of_device_id % 128)`. This is stable — adding or reordering shutters does not change existing offsets and does not require re-teaching.
+
+On startup, each shutter logs its offset:
+
+```
+Shutter Living Room (05:12:34:56) using sender offset 86
+Shutter Bedroom (05:12:34:57) using sender offset 87
+```
+
+If two actuators happen to produce the same offset, the application **refuses to start** with an error:
+
+```
+ValueError: Sender offset collision: Bedroom (05:12:34:57) and Living Room (05:12:34:56)
+both use offset 86. Set sender_offset on one of them to resolve this.
+```
+
+To resolve, set `sender_offset` on one of the colliding shutters in the config and re-teach only that actuator:
+
+```yaml
+shutters:
+  - id: "05:12:34:56"
+    name: "Living Room"
+    full_close_time: 25
+    full_open_time: 23
+
+  - id: "05:12:34:57"
+    name: "Bedroom"
+    full_close_time: 25
+    full_open_time: 23
+    sender_offset: 42          # manual override to resolve collision
+```
+
+## Discovering Device IDs
+
+To find the EnOcean IDs of buttons and actuators, check the startup logs for unknown devices:
+
+```
+Received status from unknown device FE:D1:42:AB
+```
+
+Press a room's wall button and watch the logs — the button ID and any responding actuator IDs will appear. Actuator IDs can also be read from the decimal number printed on the device label.
+
+## Position Tracking
+
+Since the FSB61NP does not report absolute position, the bridge estimates position from motor travel time. Positions are persisted to disk and restored on restart.
+
+- `0` = fully closed, `100` = fully open (matches Home Assistant convention)
+- The tracker accounts for different open/close travel times
+- Physical button presses and HA commands both update the position
+
+## Development
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+```
+
+## MQTT Topics
+
+For each shutter (where `<id>` is the device ID without colons):
+
+| Topic | Direction | Payload |
+|---|---|---|
+| `enocean/cover/<id>/set` | Command | `OPEN` / `CLOSE` / `STOP` |
+| `enocean/cover/<id>/set_position` | Command | `0`-`100` |
+| `enocean/cover/<id>/teach_in` | Command | `1` |
+| `enocean/cover/<id>/state` | Status | `open` / `closed` / `opening` / `closing` |
+| `enocean/cover/<id>/position` | Status | `0`-`100` |
+| `enocean/cover/<id>/available` | Status | `online` / `offline` |
