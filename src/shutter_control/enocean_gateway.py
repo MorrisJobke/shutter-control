@@ -100,16 +100,24 @@ class EnOceanGateway:
         if self._communicator:
             self._communicator.stop()
 
-    def send_teach_in(self, destination: list[int]) -> None:
+    def _sender_with_offset(self, offset: int) -> list[int]:
+        """Return base_id + offset as a 4-byte sender address."""
+        base = self._base_id
+        raw = (base[0] << 24 | base[1] << 16 | base[2] << 8 | base[3]) + offset
+        return [(raw >> 24) & 0xFF, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF]
+
+    def send_teach_in(self, destination: list[int], sender_offset: int = 0) -> None:
         """Send a teach-in telegram to pair with an FSB61NP actuator.
 
         The actuator must be in learn mode (LED blinking) when this is sent.
+        Each actuator should use a unique sender_offset (0, 1, 2, ...) so
+        that commands only reach the intended actuator.
         """
         if not self._communicator or not self._base_id:
             logger.error("Cannot send teach-in: communicator not ready")
             return
 
-        sender = self._base_id
+        sender = self._sender_with_offset(sender_offset)
         packet = Packet(packet_type=PACKET.RADIO)
         packet.data = bytearray([
             RORG.BS4,       # RORG
@@ -127,11 +135,20 @@ class EnOceanGateway:
             0x00,
         ])
 
-        logger.info("Sending TEACH-IN to %s", _format_id(destination))
+        logger.info(
+            "Sending TEACH-IN to %s (sender=%s, offset=%d)",
+            _format_id(destination),
+            _format_id(sender),
+            sender_offset,
+        )
         self._communicator.send(packet)
 
     def send_command(
-        self, destination: list[int], direction: Direction, time_sec: float = 0
+        self,
+        destination: list[int],
+        direction: Direction,
+        time_sec: float = 0,
+        sender_offset: int = 0,
     ) -> None:
         """Send a move/stop command to an FSB61NP actuator.
 
@@ -139,6 +156,7 @@ class EnOceanGateway:
             destination: 4-byte device ID, e.g. [0x05, 0x12, 0x34, 0x56]
             direction: UP, DOWN, or STOP
             time_sec: drive time in seconds (0 = stop)
+            sender_offset: offset from base_id to use as sender address
         """
         if not self._communicator:
             logger.error("Cannot send: communicator not started")
@@ -174,7 +192,7 @@ class EnOceanGateway:
         # ESP3 Radio packet structure:
         #   data:     [RORG, DB3, DB2, DB1, DB0, sender(4), status]
         #   optional: [sub_tel, dest(4), dBm, security]
-        sender = self._base_id
+        sender = self._sender_with_offset(sender_offset)
         packet = Packet(packet_type=PACKET.RADIO)
         packet.data = bytearray([
             RORG.BS4,       # RORG

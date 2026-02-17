@@ -20,6 +20,8 @@ shutters:
     name: "Bedroom"
     full_close_time: 25
     full_open_time: 23
+    # sender_offset: 42         # optional: override auto-calculated offset
+                                 # to resolve collisions (0-127)
 
 # ── Physical wall buttons ──────────────────────────────────────────
 #
@@ -40,7 +42,12 @@ buttons:
 # ── Teach-in (pairing) ──────────────────────────────────────────────
 #
 # Each FSB61NP-230V must be paired with the USB 300 gateway before it
-# will respond to commands. Do this once per actuator:
+# will respond to commands.  Each shutter automatically gets a unique
+# sender address derived from its device ID (base_id + last_byte % 128)
+# so that commands only reach the intended actuator.  Adding or
+# reordering shutters does NOT require re-teaching existing actuators.
+#
+# To teach-in an actuator:
 #
 #   1. On the FSB61NP, turn the upper rotary switch to "LRN".
 #      The LED starts blinking (you have about 1 minute).

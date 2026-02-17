@@ -28,6 +28,8 @@ _shutters_by_safe_id: dict[str, ShutterConfig] = {}
 _id_to_safe: dict[str, str] = {}
 # Lookup from button EnOcean ID (upper-case) -> list of shutter safe_ids
 _button_to_shutters: dict[str, list[str]] = {}
+# Lookup from safe_id -> sender offset (0, 1, 2, ...) for unique addressing
+_sender_offsets: dict[str, int] = {}
 
 
 def _setup_logging() -> None:
@@ -50,15 +52,16 @@ def _handle_command(
         return
 
     dest = shutter.device_id
+    offset = _sender_offsets.get(safe_id, 0)
 
     if command == "OPEN":
-        gateway.send_command(dest, Direction.UP, shutter.full_open_time)
+        gateway.send_command(dest, Direction.UP, shutter.full_open_time, offset)
         tracker.start_moving(safe_id, MotionState.OPENING)
     elif command == "CLOSE":
-        gateway.send_command(dest, Direction.DOWN, shutter.full_close_time)
+        gateway.send_command(dest, Direction.DOWN, shutter.full_close_time, offset)
         tracker.start_moving(safe_id, MotionState.CLOSING)
     elif command == "STOP":
-        gateway.send_command(dest, Direction.STOP)
+        gateway.send_command(dest, Direction.STOP, sender_offset=offset)
         tracker.stop(safe_id)
 
 
@@ -86,17 +89,19 @@ def _handle_set_position(
 
     dest = shutter.device_id
 
+    offset = _sender_offsets.get(safe_id, 0)
+
     if diff > 0:
         # Need to open (move up)
         travel_fraction = diff / 100.0
         drive_time = travel_fraction * shutter.full_open_time
-        gateway.send_command(dest, Direction.UP, drive_time)
+        gateway.send_command(dest, Direction.UP, drive_time, offset)
         tracker.start_moving(safe_id, MotionState.OPENING, target_position=float(target))
     else:
         # Need to close (move down)
         travel_fraction = abs(diff) / 100.0
         drive_time = travel_fraction * shutter.full_close_time
-        gateway.send_command(dest, Direction.DOWN, drive_time)
+        gateway.send_command(dest, Direction.DOWN, drive_time, offset)
         tracker.start_moving(safe_id, MotionState.CLOSING, target_position=float(target))
 
 
@@ -178,7 +183,8 @@ def _handle_teach_in(safe_id: str, gateway: EnOceanGateway) -> None:
     shutter = _shutters_by_safe_id.get(safe_id)
     if not shutter:
         return
-    gateway.send_teach_in(shutter.device_id)
+    offset = _sender_offsets.get(safe_id, 0)
+    gateway.send_teach_in(shutter.device_id, offset)
 
 
 def _handle_position_update(
@@ -203,7 +209,8 @@ async def _position_check_loop(
         for safe_id in stop_ids:
             shutter = _shutters_by_safe_id.get(safe_id)
             if shutter:
-                gateway.send_command(shutter.device_id, Direction.STOP)
+                offset = _sender_offsets.get(safe_id, 0)
+                gateway.send_command(shutter.device_id, Direction.STOP, sender_offset=offset)
                 tracker.stop(safe_id)
 
         # Publish current positions for moving shutters
@@ -218,10 +225,37 @@ async def _position_check_loop(
 async def _run(config_path: str) -> None:
     config = load_config(config_path)
 
-    # Build lookup tables
+    # Build lookup tables — each shutter gets a stable sender offset
+    # derived from its device ID so that adding/reordering shutters
+    # doesn't require re-teaching actuators.  Can be overridden via
+    # sender_offset in the config to resolve collisions.
+    seen_offsets: dict[int, ShutterConfig] = {}
     for shutter in config.shutters:
         _shutters_by_safe_id[shutter.safe_id] = shutter
         _id_to_safe[shutter.id.upper()] = shutter.safe_id
+
+        if shutter.sender_offset is not None:
+            offset = shutter.sender_offset
+        else:
+            offset = shutter.device_id[-1] % 128
+
+        if offset in seen_offsets:
+            other = seen_offsets[offset]
+            raise ValueError(
+                f"Sender offset collision: {shutter.name} ({shutter.id}) and "
+                f"{other.name} ({other.id}) both use offset {offset}. "
+                f"Set sender_offset on one of them to resolve this."
+            )
+
+        seen_offsets[offset] = shutter
+        _sender_offsets[shutter.safe_id] = offset
+        logger.info(
+            "Shutter %s (%s) using sender offset %d%s",
+            shutter.name,
+            shutter.id,
+            offset,
+            " (from config)" if shutter.sender_offset is not None else "",
+        )
 
     # Build button -> shutters lookup
     for button in config.buttons:

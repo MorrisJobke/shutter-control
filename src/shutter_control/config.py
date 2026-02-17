@@ -27,6 +27,7 @@ class ShutterConfig:
     name: str
     full_close_time: float = 25.0
     full_open_time: float = 23.0
+    sender_offset: int | None = None
 
     @property
     def device_id(self) -> list[int]:
