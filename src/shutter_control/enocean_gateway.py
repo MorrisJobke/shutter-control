@@ -39,12 +39,23 @@ class Direction(IntEnum):
 
 
 class StatusEvent:
-    """Parsed status event from an FSB61NP actuator."""
+    """Parsed status event from an FSB61NP actuator or wall button."""
 
-    def __init__(self, sender_id: str, direction: Direction | None, stopped: bool):
+    def __init__(
+        self,
+        sender_id: str,
+        direction: Direction | None,
+        stopped: bool,
+        is_standard_rocker: bool = False,
+    ):
         self.sender_id = sender_id
         self.direction = direction
         self.stopped = stopped
+        # True for standard F6-02-02 rocker encoding (rocker values 1/2/3).
+        # False for Eltako proprietary encoding (low-byte direction) and
+        # for 4BS stop events.  Actuator end-position notifications use
+        # standard rocker format and should be ignored for movement tracking.
+        self.is_standard_rocker = is_standard_rocker
 
     def __repr__(self) -> str:
         return f"StatusEvent({self.sender_id}, dir={self.direction}, stopped={self.stopped})"
@@ -274,6 +285,8 @@ class EnOceanGateway:
         if nu_bit:
             rocker_value = (status_byte >> 5) & 0x07
 
+            is_standard_rocker = rocker_value != 0
+
             if rocker_value in (1, 3):
                 # Standard AO or BO = down/close
                 direction = Direction.DOWN
@@ -288,7 +301,10 @@ class EnOceanGateway:
             else:
                 direction = None
 
-            event = StatusEvent(sender_id, direction=direction, stopped=False)
+            event = StatusEvent(
+                sender_id, direction=direction, stopped=False,
+                is_standard_rocker=is_standard_rocker,
+            )
         else:
             # Button released = motor stopped
             event = StatusEvent(sender_id, direction=None, stopped=True)

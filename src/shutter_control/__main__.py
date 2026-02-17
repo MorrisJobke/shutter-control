@@ -189,9 +189,20 @@ def _apply_status_to_shutter(
     event: StatusEvent,
     tracker: PositionTracker,
 ) -> None:
-    """Apply a status event to a single shutter's position tracker."""
+    """Apply a status event from an actuator to the position tracker.
+
+    Ignores standard-rocker-format telegrams from actuators, as these
+    are end-position notifications (sent minutes after the motor stopped),
+    not real movement status.
+    """
     if event.stopped:
         tracker.stop(safe_id)
+        return
+
+    if event.is_standard_rocker:
+        logger.debug(
+            "Ignoring end-position notification from actuator %s", safe_id
+        )
         return
 
     direction = event.direction
