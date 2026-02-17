@@ -22,6 +22,8 @@ shutters:
     full_open_time: 23
     # sender_offset: 42         # optional: override auto-calculated offset
                                  # to resolve collisions (0-127)
+    # invert_direction: true    # optional: swap open/close if motor is wired
+                                 # in reverse
 
 # ── Physical wall buttons ──────────────────────────────────────────
 #

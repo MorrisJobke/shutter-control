@@ -40,6 +40,15 @@ def _setup_logging() -> None:
     )
 
 
+def _invert(direction: Direction) -> Direction:
+    """Swap UP/DOWN for actuators with reversed motor wiring."""
+    if direction == Direction.UP:
+        return Direction.DOWN
+    if direction == Direction.DOWN:
+        return Direction.UP
+    return direction
+
+
 def _handle_command(
     safe_id: str,
     command: str,
@@ -54,11 +63,13 @@ def _handle_command(
     dest = shutter.device_id
     offset = _sender_offsets.get(safe_id, 0)
 
+    inv = shutter.invert_direction
+
     if command == "OPEN":
-        gateway.send_command(dest, Direction.UP, shutter.full_open_time, offset)
+        gateway.send_command(dest, _invert(Direction.UP) if inv else Direction.UP, shutter.full_open_time, offset)
         tracker.start_moving(safe_id, MotionState.OPENING)
     elif command == "CLOSE":
-        gateway.send_command(dest, Direction.DOWN, shutter.full_close_time, offset)
+        gateway.send_command(dest, _invert(Direction.DOWN) if inv else Direction.DOWN, shutter.full_close_time, offset)
         tracker.start_moving(safe_id, MotionState.CLOSING)
     elif command == "STOP":
         gateway.send_command(dest, Direction.STOP, sender_offset=offset)
@@ -91,17 +102,21 @@ def _handle_set_position(
 
     offset = _sender_offsets.get(safe_id, 0)
 
+    inv = shutter.invert_direction
+
     if diff > 0:
         # Need to open (move up)
         travel_fraction = diff / 100.0
         drive_time = travel_fraction * shutter.full_open_time
-        gateway.send_command(dest, Direction.UP, drive_time, offset)
+        direction = _invert(Direction.UP) if inv else Direction.UP
+        gateway.send_command(dest, direction, drive_time, offset)
         tracker.start_moving(safe_id, MotionState.OPENING, target_position=float(target))
     else:
         # Need to close (move down)
         travel_fraction = abs(diff) / 100.0
         drive_time = travel_fraction * shutter.full_close_time
-        gateway.send_command(dest, Direction.DOWN, drive_time, offset)
+        direction = _invert(Direction.DOWN) if inv else Direction.DOWN
+        gateway.send_command(dest, direction, drive_time, offset)
         tracker.start_moving(safe_id, MotionState.CLOSING, target_position=float(target))
 
 
@@ -144,14 +159,19 @@ def _handle_button_event(
         # Momentary release — ignore, the actuator keeps running
         return
 
-    pressed_motion = (
-        MotionState.OPENING if event.direction == Direction.UP else MotionState.CLOSING
-    )
-
     for sid in shutter_ids:
         state = tracker.get_state(sid)
         if not state:
             continue
+
+        direction = event.direction
+        shutter = _shutters_by_safe_id.get(sid)
+        if shutter and shutter.invert_direction:
+            direction = _invert(direction)
+
+        pressed_motion = (
+            MotionState.OPENING if direction == Direction.UP else MotionState.CLOSING
+        )
 
         if state.motion == MotionState.STOPPED:
             logger.info("Button → %s shutter %s", pressed_motion.name, sid)
@@ -172,9 +192,16 @@ def _apply_status_to_shutter(
     """Apply a status event to a single shutter's position tracker."""
     if event.stopped:
         tracker.stop(safe_id)
-    elif event.direction == Direction.UP:
+        return
+
+    direction = event.direction
+    shutter = _shutters_by_safe_id.get(safe_id)
+    if shutter and shutter.invert_direction and direction is not None:
+        direction = _invert(direction)
+
+    if direction == Direction.UP:
         tracker.start_moving(safe_id, MotionState.OPENING)
-    elif event.direction == Direction.DOWN:
+    elif direction == Direction.DOWN:
         tracker.start_moving(safe_id, MotionState.CLOSING)
 
 

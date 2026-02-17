@@ -77,6 +77,7 @@ buttons:
 | `full_close_time` | Seconds from fully open to fully closed |
 | `full_open_time` | Seconds from fully closed to fully open |
 | `sender_offset` | Optional override for the sender address offset (0-127) |
+| `invert_direction` | Set to `true` if the motor is wired in reverse (swaps open/close) |
 
 ### Buttons
 
@@ -138,6 +139,19 @@ shutters:
     full_close_time: 25
     full_open_time: 23
     sender_offset: 42          # manual override to resolve collision
+```
+
+## Inverted Motor Direction
+
+Some actuators may have their motor wired in reverse, causing "open" commands to close the shutter and vice versa. Set `invert_direction: true` on the affected shutter to swap the direction for commands, status tracking, and button events:
+
+```yaml
+shutters:
+  - id: "04:2C:86:88"
+    name: "HWR"
+    full_close_time: 18
+    full_open_time: 19
+    invert_direction: true
 ```
 
 ## Discovering Device IDs

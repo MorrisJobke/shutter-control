@@ -175,11 +175,11 @@ class EnOceanGateway:
         time_msb = (time_val >> 8) & 0xFF
         time_lsb = time_val & 0xFF
 
-        # DB1: direction bits (Eltako: 0x01 = down/close, 0x02 = up/open)
+        # DB1: direction bits (Eltako: 0x01 = up/open, 0x02 = down/close)
         if direction == Direction.UP:
-            db1 = 0x02
-        elif direction == Direction.DOWN:
             db1 = 0x01
+        elif direction == Direction.DOWN:
+            db1 = 0x02
         else:
             db1 = 0x00
 
@@ -280,8 +280,8 @@ class EnOceanGateway:
             elif rocker_value in (0, 2):
                 # Standard AI or BI = up/open, BUT for Eltako actuators
                 # rocker_value is always 0 and the direction is in the
-                # low bits: 0x01 = down, 0x02 = up.
-                if rocker_value == 0 and (status_byte & 0x0F) == 0x01:
+                # low bits: 0x01 = up, 0x02 = down.
+                if rocker_value == 0 and (status_byte & 0x0F) == 0x02:
                     direction = Direction.DOWN
                 else:
                     direction = Direction.UP

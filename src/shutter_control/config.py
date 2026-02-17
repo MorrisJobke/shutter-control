@@ -28,6 +28,7 @@ class ShutterConfig:
     full_close_time: float = 25.0
     full_open_time: float = 23.0
     sender_offset: int | None = None
+    invert_direction: bool = False
 
     @property
     def device_id(self) -> list[int]:
