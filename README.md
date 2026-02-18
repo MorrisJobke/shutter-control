@@ -7,9 +7,10 @@ EnOcean-to-MQTT bridge for **Eltako FSB61NP-230V** roller shutter actuators, des
 - Control Eltako FSB61NP shutters from Home Assistant via MQTT
 - Home Assistant auto-discovery (no manual HA configuration needed)
 - Time-based position tracking with persistence across restarts
-- Physical wall button support — keeps HA in sync when shutters are controlled via room buttons
+- Queued sending with inter-packet delay — reliably controls many shutters simultaneously without overloading the USB gateway
 - Unique sender addressing — each actuator gets its own sender ID so commands don't cross-trigger
 - Teach-in support via MQTT
+- Device discovery — logs teach-in requests from unknown actuators so you can find their IDs without reading the label
 
 ## Requirements
 
@@ -61,11 +62,6 @@ shutters:
     name: "Living Room"
     full_close_time: 25       # seconds, fully open -> fully closed
     full_open_time: 23        # seconds, fully closed -> fully open
-
-buttons:
-  - id: "FE:12:34:56"        # EnOcean ID of the wall button
-    shutters:
-      - "05:12:34:56"
 ```
 
 ### Shutters
@@ -78,17 +74,6 @@ buttons:
 | `full_open_time` | Seconds from fully closed to fully open |
 | `sender_offset` | Optional override for the sender address offset (0-127) |
 | `invert_direction` | Set to `true` if the motor is wired in reverse (swaps open/close) |
-
-### Buttons
-
-Physical wall buttons (e.g. Eltako FT55) that directly control shutters via EnOcean radio. The bridge listens for their telegrams and updates position tracking so Home Assistant stays in sync.
-
-A single button can control multiple shutters (e.g. all shutters in a room). Buttons use momentary toggle logic: pressing the same direction again stops the shutter, pressing the opposite direction reverses it.
-
-| Field | Description |
-|---|---|
-| `id` | EnOcean ID of the wall button |
-| `shutters` | List of shutter IDs this button controls |
 
 ## Teach-in
 
@@ -143,7 +128,7 @@ shutters:
 
 ## Inverted Motor Direction
 
-Some actuators may have their motor wired in reverse, causing "open" commands to close the shutter and vice versa. Set `invert_direction: true` on the affected shutter to swap the direction for commands, status tracking, and button events:
+Some actuators may have their motor wired in reverse, causing "open" commands to close the shutter and vice versa. Set `invert_direction: true` on the affected shutter to swap the direction for commands and status tracking:
 
 ```yaml
 shutters:
@@ -156,13 +141,22 @@ shutters:
 
 ## Discovering Device IDs
 
-To find the EnOcean IDs of buttons and actuators, check the startup logs for unknown devices:
+If the device label is not accessible, you can discover actuator IDs over the air:
+
+1. Start the bridge.
+2. Turn the actuator's rotary switch to **LRN**. The log will show:
+   ```
+   TEACH-IN request from 04:2C:XX:XX — add this ID to config.yaml to control it
+   ```
+3. Copy the ID into `config.yaml` and turn the switch back.
+
+Alternatively, operating a shutter via a wall button will also reveal its ID in the logs:
 
 ```
-Received status from unknown device FE:D1:42:AB
+Ignoring status from unknown device 04:2C:XX:XX
 ```
 
-Press a room's wall button and watch the logs — the button ID and any responding actuator IDs will appear. Actuator IDs can also be read from the decimal number printed on the device label.
+Actuator IDs can also be read from the decimal number printed on the device label and converted to hex.
 
 ## Position Tracking
 
@@ -170,7 +164,7 @@ Since the FSB61NP does not report absolute position, the bridge estimates positi
 
 - `0` = fully closed, `100` = fully open (matches Home Assistant convention)
 - The tracker accounts for different open/close travel times
-- Physical button presses and HA commands both update the position
+- Actuator confirmation telegrams and HA commands both update the position
 
 ## Development
 
