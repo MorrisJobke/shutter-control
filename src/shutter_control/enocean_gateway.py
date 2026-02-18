@@ -20,6 +20,7 @@ Status telegrams from the device use RPS (RORG 0xF6):
 """
 
 import logging
+import queue
 import threading
 import time
 from enum import IntEnum
@@ -68,6 +69,8 @@ class EnOceanGateway:
         self._base_id: list[int] | None = None
         self._on_status: Callable[[StatusEvent], None] | None = None
         self._receive_thread: threading.Thread | None = None
+        self._send_queue: queue.Queue[Packet | None] = queue.Queue()
+        self._send_thread: threading.Thread | None = None
         self._running = False
 
     @property
@@ -100,6 +103,10 @@ class EnOceanGateway:
             raise RuntimeError("Could not read EnOcean base ID after 5 seconds")
 
         self._running = True
+        self._send_thread = threading.Thread(
+            target=self._send_loop, daemon=True, name="enocean-tx"
+        )
+        self._send_thread.start()
         self._receive_thread = threading.Thread(
             target=self._receive_loop, daemon=True, name="enocean-rx"
         )
@@ -108,6 +115,9 @@ class EnOceanGateway:
     def stop(self) -> None:
         logger.info("Stopping EnOcean gateway")
         self._running = False
+        self._send_queue.put(None)
+        if self._send_thread:
+            self._send_thread.join(timeout=5.0)
         if self._communicator:
             self._communicator.stop()
 
@@ -152,7 +162,7 @@ class EnOceanGateway:
             _format_id(sender),
             sender_offset,
         )
-        self._communicator.send(packet)
+        self._send_queue.put(packet)
 
     def send_command(
         self,
@@ -231,7 +241,19 @@ class EnOceanGateway:
             db1,
             db0,
         )
-        self._communicator.send(packet)
+        self._send_queue.put(packet)
+
+    def _send_loop(self) -> None:
+        """Drain the send queue, enforcing a minimum delay between packets."""
+        while self._running:
+            try:
+                packet = self._send_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if packet is None:
+                break
+            self._communicator.send(packet)
+            time.sleep(0.2)
 
     def _receive_loop(self) -> None:
         """Process incoming EnOcean packets."""
