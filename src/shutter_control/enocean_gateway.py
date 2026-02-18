@@ -347,9 +347,14 @@ class EnOceanGateway:
 
         db0 = packet.data[4]
 
-        # Ignore teach-in telegrams (bit 3 cleared)
+        # Teach-in request (bit 3 cleared) — the actuator broadcasts this
+        # when its rotary switch is set to LRN.  Log the ID so the user can
+        # add it to config.yaml.
         if not (db0 & 0x08):
-            logger.debug("4BS teach-in from %s, ignoring", sender_id)
+            logger.info(
+                "TEACH-IN request from %s — add this ID to config.yaml to control it",
+                sender_id,
+            )
             return
 
         # Actuator stopped — report as a stop event
