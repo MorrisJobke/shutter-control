@@ -25,22 +25,6 @@ shutters:
     # invert_direction: true    # optional: swap open/close if motor is wired
                                  # in reverse
 
-# ── Physical wall buttons ──────────────────────────────────────────
-#
-# Wall buttons (e.g. Eltako FT55) that directly control shutters via
-# EnOcean radio. When a button press is detected, the bridge updates
-# the position tracking for all associated shutters so that Home
-# Assistant stays in sync.
-#
-# Each button has an EnOcean ID and a list of shutter IDs it controls.
-# A single button can control multiple shutters (e.g. all shutters in
-# a room).
-buttons:
-  - id: "FE:12:34:56"            # EnOcean ID of the wall button
-    shutters:                     # shutters this button controls
-      - "05:12:34:56"
-      - "05:12:34:57"
-
 # ── Teach-in (pairing) ──────────────────────────────────────────────
 #
 # Each FSB61NP-230V must be paired with the USB 300 gateway before it

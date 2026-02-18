@@ -10,7 +10,7 @@ from pathlib import Path
 from bs4 import XMLParsedAsHTMLWarning
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-from .config import ButtonConfig, ShutterConfig, load_config
+from .config import ShutterConfig, load_config
 from .enocean_gateway import Direction, EnOceanGateway, StatusEvent
 from .mqtt_handler import MqttHandler
 from .position_tracker import (
@@ -26,8 +26,6 @@ logger = logging.getLogger("shutter_control")
 _shutters_by_safe_id: dict[str, ShutterConfig] = {}
 # Lookup from EnOcean device ID (upper-case) -> safe_id
 _id_to_safe: dict[str, str] = {}
-# Lookup from button EnOcean ID (upper-case) -> list of shutter safe_ids
-_button_to_shutters: dict[str, list[str]] = {}
 # Lookup from safe_id -> sender offset (0, 1, 2, ...) for unique addressing
 _sender_offsets: dict[str, int] = {}
 
@@ -124,64 +122,15 @@ def _handle_enocean_status(
     event: StatusEvent,
     tracker: PositionTracker,
 ) -> None:
-    """Handle status telegrams from EnOcean devices (actuators and wall buttons)."""
+    """Handle status telegrams from EnOcean actuators."""
     sender = event.sender_id.upper()
 
-    # Check if this is a known actuator
     safe_id = _id_to_safe.get(sender)
     if safe_id:
         _apply_status_to_shutter(safe_id, event, tracker)
         return
 
-    # Check if this is a known wall button
-    shutter_ids = _button_to_shutters.get(sender)
-    if shutter_ids:
-        _handle_button_event(shutter_ids, event, tracker)
-        return
-
     logger.debug("Ignoring status from unknown device %s", event.sender_id)
-
-
-def _handle_button_event(
-    shutter_ids: list[str],
-    event: StatusEvent,
-    tracker: PositionTracker,
-) -> None:
-    """Handle a wall button press for associated shutters.
-
-    Wall buttons are momentary switches — the release does not stop the motor.
-    The actuator uses toggle logic:
-      - If stopped: start moving in the pressed direction
-      - If already moving in same direction: stop
-      - If moving in opposite direction: reverse
-    """
-    if event.stopped or event.direction is None:
-        # Momentary release — ignore, the actuator keeps running
-        return
-
-    for sid in shutter_ids:
-        state = tracker.get_state(sid)
-        if not state:
-            continue
-
-        direction = event.direction
-        shutter = _shutters_by_safe_id.get(sid)
-        if shutter and shutter.invert_direction:
-            direction = _invert(direction)
-
-        pressed_motion = (
-            MotionState.OPENING if direction == Direction.UP else MotionState.CLOSING
-        )
-
-        if state.motion == MotionState.STOPPED:
-            logger.info("Button → %s shutter %s", pressed_motion.name, sid)
-            tracker.start_moving(sid, pressed_motion)
-        elif state.motion == pressed_motion:
-            logger.info("Button → STOP shutter %s (same direction toggle)", sid)
-            tracker.stop(sid)
-        else:
-            logger.info("Button → reverse shutter %s to %s", sid, pressed_motion.name)
-            tracker.start_moving(sid, pressed_motion)
 
 
 def _apply_status_to_shutter(
@@ -295,26 +244,6 @@ async def _run(config_path: str) -> None:
             " (from config)" if shutter.sender_offset is not None else "",
         )
 
-    # Build button -> shutters lookup
-    for button in config.buttons:
-        shutter_safe_ids = []
-        for shutter_id in button.shutters:
-            safe = shutter_id.replace(":", "").lower()
-            if safe not in _shutters_by_safe_id:
-                logger.warning(
-                    "Button %s references unknown shutter %s", button.id, shutter_id
-                )
-                continue
-            shutter_safe_ids.append(safe)
-        if shutter_safe_ids:
-            _button_to_shutters[button.safe_id] = shutter_safe_ids
-            logger.info(
-                "Button %s controls %d shutter(s): %s",
-                button.id,
-                len(shutter_safe_ids),
-                ", ".join(shutter_safe_ids),
-            )
-
     # Initialize position tracker
     tracker = PositionTracker(persistence_path=config.position_file)
     for shutter in config.shutters:
@@ -355,9 +284,8 @@ async def _run(config_path: str) -> None:
     mqtt_handler.start()
 
     logger.info(
-        "Shutter control started with %d shutter(s) and %d button(s)",
+        "Shutter control started with %d shutter(s)",
         len(config.shutters),
-        len(config.buttons),
     )
 
     # Set up shutdown
