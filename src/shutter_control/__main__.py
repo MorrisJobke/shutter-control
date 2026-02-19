@@ -191,10 +191,13 @@ def _apply_status_to_shutter(
     if shutter and shutter.invert_direction and direction is not None:
         direction = _invert(direction)
 
+    # Preserve any active target (e.g. a set_position in progress)
+    active_target = tracker.get_target(safe_id)
+
     if direction == Direction.UP:
-        tracker.start_moving(safe_id, MotionState.OPENING)
+        tracker.start_moving(safe_id, MotionState.OPENING, target_position=active_target)
     elif direction == Direction.DOWN:
-        tracker.start_moving(safe_id, MotionState.CLOSING)
+        tracker.start_moving(safe_id, MotionState.CLOSING, target_position=active_target)
 
 
 def _handle_teach_in(safe_id: str, gateway: EnOceanGateway) -> None:

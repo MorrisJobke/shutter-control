@@ -96,6 +96,11 @@ class PositionTracker:
         except Exception:
             logger.exception("Failed to save positions to %s", self._persistence_path)
 
+    def get_target(self, shutter_id: str) -> float | None:
+        """Return the active target position, or None if running to end."""
+        state = self._shutters.get(shutter_id)
+        return state._target_position if state else None
+
     def get_state(self, shutter_id: str) -> ShutterState | None:
         state = self._shutters.get(shutter_id)
         if state and state.motion != MotionState.STOPPED:
