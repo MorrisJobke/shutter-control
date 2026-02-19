@@ -4,7 +4,9 @@ import asyncio
 import logging
 import signal
 import sys
+import time
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 from bs4 import XMLParsedAsHTMLWarning
@@ -28,6 +30,18 @@ _shutters_by_safe_id: dict[str, ShutterConfig] = {}
 _id_to_safe: dict[str, str] = {}
 # Lookup from safe_id -> sender offset (0, 1, 2, ...) for unique addressing
 _sender_offsets: dict[str, int] = {}
+
+COMMAND_ACK_TIMEOUT = 5.0  # seconds to wait for RPS moving confirmation before retrying
+
+
+@dataclass
+class _PendingCommand:
+    command: str   # "OPEN" or "CLOSE"
+    sent_at: float
+    retried: bool = False
+
+
+_pending_commands: dict[str, _PendingCommand] = {}
 
 
 def _setup_logging() -> None:
@@ -72,6 +86,20 @@ def _handle_command(
     elif command == "STOP":
         gateway.send_command(dest, Direction.STOP, sender_offset=offset)
         tracker.stop(safe_id)
+
+
+def _on_mqtt_command(
+    safe_id: str,
+    command: str,
+    gateway: EnOceanGateway,
+    tracker: PositionTracker,
+) -> None:
+    """Handle OPEN/CLOSE/STOP from MQTT and track pending acknowledgements."""
+    _handle_command(safe_id, command, gateway, tracker)
+    if command in ("OPEN", "CLOSE"):
+        _pending_commands[safe_id] = _PendingCommand(command=command, sent_at=time.monotonic())
+    elif command == "STOP":
+        _pending_commands.pop(safe_id, None)
 
 
 def _handle_set_position(
@@ -145,6 +173,7 @@ def _apply_status_to_shutter(
     not real movement status.
     """
     if event.stopped:
+        _pending_commands.pop(safe_id, None)
         tracker.stop(safe_id)
         return
 
@@ -153,6 +182,9 @@ def _apply_status_to_shutter(
             "Ignoring end-position notification from actuator %s", safe_id
         )
         return
+
+    # Motor confirmed moving — command acknowledged
+    _pending_commands.pop(safe_id, None)
 
     direction = event.direction
     shutter = _shutters_by_safe_id.get(safe_id)
@@ -191,6 +223,29 @@ async def _position_check_loop(
 ) -> None:
     """Periodically check if shutters reached their target and publish updates."""
     while True:
+        # Retry commands that were never acknowledged by the actuator
+        now = time.monotonic()
+        for safe_id, pending in list(_pending_commands.items()):
+            if now - pending.sent_at < COMMAND_ACK_TIMEOUT:
+                continue
+            shutter = _shutters_by_safe_id.get(safe_id)
+            name = shutter.name if shutter else safe_id
+            if pending.retried:
+                logger.warning(
+                    "Shutter %s (%s): no response after retry, giving up",
+                    name, safe_id,
+                )
+                del _pending_commands[safe_id]
+            else:
+                logger.warning(
+                    "Shutter %s (%s): no response to %s after %.0fs, retrying",
+                    name, safe_id, pending.command, COMMAND_ACK_TIMEOUT,
+                )
+                _handle_command(safe_id, pending.command, gateway, tracker)
+                _pending_commands[safe_id] = _PendingCommand(
+                    command=pending.command, sent_at=time.monotonic(), retried=True
+                )
+
         # Check for shutters that reached their target
         stop_ids = tracker.check_targets()
         for safe_id in stop_ids:
@@ -261,7 +316,7 @@ async def _run(config_path: str) -> None:
 
     # Wire callbacks
     mqtt_handler.set_command_callback(
-        lambda sid, cmd: _handle_command(sid, cmd, gateway, tracker)
+        lambda sid, cmd: _on_mqtt_command(sid, cmd, gateway, tracker)
     )
     mqtt_handler.set_position_callback(
         lambda sid, pos: _handle_set_position(sid, pos, gateway, tracker)
