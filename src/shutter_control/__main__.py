@@ -31,14 +31,16 @@ _id_to_safe: dict[str, str] = {}
 # Lookup from safe_id -> sender offset (0, 1, 2, ...) for unique addressing
 _sender_offsets: dict[str, int] = {}
 
-COMMAND_ACK_TIMEOUT = 5.0  # seconds to wait for RPS moving confirmation before retrying
+COMMAND_ACK_TIMEOUT = 5.0  # seconds before first retry; doubles each attempt
+MAX_RETRIES = 2
 
 
 @dataclass
 class _PendingCommand:
-    command: str   # "OPEN" or "CLOSE"
+    command: str          # "OPEN" or "CLOSE"
     sent_at: float
-    retried: bool = False
+    start_position: float  # position before the command, for reverting on failure
+    retry_count: int = 0
 
 
 _pending_commands: dict[str, _PendingCommand] = {}
@@ -95,9 +97,14 @@ def _on_mqtt_command(
     tracker: PositionTracker,
 ) -> None:
     """Handle OPEN/CLOSE/STOP from MQTT and track pending acknowledgements."""
+    if command in ("OPEN", "CLOSE"):
+        state = tracker.get_state(safe_id)
+        start_pos = state.position if state else 0.0
     _handle_command(safe_id, command, gateway, tracker)
     if command in ("OPEN", "CLOSE"):
-        _pending_commands[safe_id] = _PendingCommand(command=command, sent_at=time.monotonic())
+        _pending_commands[safe_id] = _PendingCommand(
+            command=command, sent_at=time.monotonic(), start_position=start_pos
+        )
     elif command == "STOP":
         _pending_commands.pop(safe_id, None)
 
@@ -229,25 +236,26 @@ async def _position_check_loop(
         # Retry commands that were never acknowledged by the actuator
         now = time.monotonic()
         for safe_id, pending in list(_pending_commands.items()):
-            if now - pending.sent_at < COMMAND_ACK_TIMEOUT:
+            timeout = COMMAND_ACK_TIMEOUT * (pending.retry_count + 1)
+            if now - pending.sent_at < timeout:
                 continue
             shutter = _shutters_by_safe_id.get(safe_id)
             name = shutter.name if shutter else safe_id
-            if pending.retried:
+            if pending.retry_count >= MAX_RETRIES:
                 logger.warning(
-                    "Shutter %s (%s): no response after retry, giving up",
-                    name, safe_id,
+                    "Shutter %s (%s): no response after %d retries, reverting to %.1f%%",
+                    name, safe_id, MAX_RETRIES, pending.start_position,
                 )
+                tracker.revert(safe_id, pending.start_position)
                 del _pending_commands[safe_id]
             else:
+                pending.retry_count += 1
                 logger.warning(
-                    "Shutter %s (%s): no response to %s after %.0fs, retrying",
-                    name, safe_id, pending.command, COMMAND_ACK_TIMEOUT,
+                    "Shutter %s (%s): no response to %s, retrying (%d/%d)",
+                    name, safe_id, pending.command, pending.retry_count, MAX_RETRIES,
                 )
                 _handle_command(safe_id, pending.command, gateway, tracker)
-                _pending_commands[safe_id] = _PendingCommand(
-                    command=pending.command, sent_at=time.monotonic(), retried=True
-                )
+                pending.sent_at = time.monotonic()
 
         # Check for shutters that reached their target
         stop_ids = tracker.check_targets()

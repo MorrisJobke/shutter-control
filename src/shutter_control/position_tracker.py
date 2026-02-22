@@ -96,6 +96,18 @@ class PositionTracker:
         except Exception:
             logger.exception("Failed to save positions to %s", self._persistence_path)
 
+    def revert(self, shutter_id: str, position: float) -> None:
+        """Stop and revert to a known position (used when a command gets no ACK)."""
+        state = self._shutters.get(shutter_id)
+        if not state:
+            return
+        state.motion = MotionState.STOPPED
+        state.position = position
+        state._target_position = None
+        logger.info("Shutter %s: reverted to %.1f%%", shutter_id, position)
+        self.save_positions()
+        self._notify(shutter_id)
+
     def get_target(self, shutter_id: str) -> float | None:
         """Return the active target position, or None if running to end."""
         state = self._shutters.get(shutter_id)
