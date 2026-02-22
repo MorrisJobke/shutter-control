@@ -10,5 +10,9 @@ COPY src/ src/
 
 RUN pip install --no-cache-dir --break-system-packages .
 
-COPY run.sh /etc/services.d/shutter_control/run
-RUN chmod a+x /etc/services.d/shutter_control/run
+# s6-overlay v3 service definition
+COPY run.sh /etc/s6-overlay/s6-rc.d/shutter_control/run
+RUN chmod a+x /etc/s6-overlay/s6-rc.d/shutter_control/run \
+ && echo "longrun" > /etc/s6-overlay/s6-rc.d/shutter_control/type \
+ && mkdir -p /etc/s6-overlay/s6-rc.d/user/contents.d \
+ && touch /etc/s6-overlay/s6-rc.d/user/contents.d/shutter_control

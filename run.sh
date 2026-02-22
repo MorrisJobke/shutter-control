@@ -1,2 +1,2 @@
-#!/usr/bin/with-contenv bashio
+#!/bin/sh
 exec shutter-control /data/options.json
