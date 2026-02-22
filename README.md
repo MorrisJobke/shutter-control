@@ -40,7 +40,7 @@ The EnOcean USB stick is selected from a device picker. MQTT defaults point to t
 1. Copy and edit the local config:
 
    ```bash
-   cp config.example.yaml config.local.yaml
+   cp settings.example.yaml config.local.yaml
    # edit config.local.yaml with your shutter IDs and MQTT credentials
    ```
 
@@ -87,7 +87,7 @@ Each shutter entry:
 
 ### YAML file (Option B — local/manual)
 
-See [`config.example.yaml`](config.example.yaml) for a fully commented example.
+See [`settings.example.yaml`](settings.example.yaml) for a fully commented example.
 
 ```yaml
 enocean:
@@ -220,7 +220,7 @@ pytest
 For local testing, copy and edit the example config:
 
 ```bash
-cp config.example.yaml config.local.yaml
+cp settings.example.yaml config.local.yaml
 shutter-control config.local.yaml
 ```
 

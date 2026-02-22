@@ -19,7 +19,7 @@ SSH_TARGET="${HAOS_USER}@${HAOS_IP}"
 SERIAL_DEV="${SERIAL_DEV:-/dev/ttyUSB0}"
 
 if [ ! -f config.yaml ]; then
-    echo "Error: config.yaml not found. Copy config.example.yaml and edit it."
+    echo "Error: config.yaml not found. Copy settings.example.yaml and edit it."
     exit 1
 fi
 

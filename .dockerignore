@@ -6,4 +6,4 @@ __pycache__/
 tests/
 .pytest_cache/
 positions.json
-config.example.yaml
+settings.example.yaml

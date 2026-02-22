@@ -394,7 +394,7 @@ def main() -> None:
     config_path = sys.argv[1] if len(sys.argv) > 1 else "config.local.yaml"
     if not Path(config_path).exists():
         logger.error("Config file not found: %s", config_path)
-        logger.error("Copy config.example.yaml to config.local.yaml and edit it")
+        logger.error("Copy settings.example.yaml to config.local.yaml and edit it")
         sys.exit(1)
 
     asyncio.run(_run(config_path))
