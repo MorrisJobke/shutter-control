@@ -12,7 +12,7 @@ from pathlib import Path
 from bs4 import XMLParsedAsHTMLWarning
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-from .config import ShutterConfig, load_config
+from .config import ShutterConfig, load_config, load_options
 from .enocean_gateway import Direction, EnOceanGateway, StatusEvent
 from .mqtt_handler import MqttHandler
 from .position_tracker import (
@@ -276,7 +276,10 @@ async def _position_check_loop(
 
 
 async def _run(config_path: str) -> None:
-    config = load_config(config_path)
+    if Path(config_path).suffix == ".json":
+        config = load_options(config_path)
+    else:
+        config = load_config(config_path)
 
     # Build lookup tables — each shutter gets a stable sender offset
     # derived from its device ID so that adding/reordering shutters
@@ -388,10 +391,10 @@ async def _run(config_path: str) -> None:
 def main() -> None:
     _setup_logging()
 
-    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.local.yaml"
     if not Path(config_path).exists():
         logger.error("Config file not found: %s", config_path)
-        logger.error("Copy config.example.yaml to config.yaml and edit it")
+        logger.error("Copy config.example.yaml to config.local.yaml and edit it")
         sys.exit(1)
 
     asyncio.run(_run(config_path))

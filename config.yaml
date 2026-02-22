@@ -1,0 +1,36 @@
+name: "Shutter Control"
+version: "1.0.0"
+slug: "shutter_control"
+description: "EnOcean-to-MQTT bridge for Eltako FSB61NP-230V roller shutters"
+url: "https://github.com/morrisjobke/shutter-control"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+startup: application
+boot: auto
+usb: true
+
+options:
+  enocean_port: /dev/ttyUSB0
+  mqtt_host: core-mosquitto
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_base_topic: enocean
+  shutters: []
+
+schema:
+  enocean_port: device(subsystem=tty)
+  mqtt_host: str
+  mqtt_port: int(1,65535)
+  mqtt_username: str
+  mqtt_password: password
+  mqtt_base_topic: str
+  shutters:
+    - id: str
+      name: str
+      full_close_time: float(1.0,300.0)
+      full_open_time: float(1.0,300.0)
+      sender_offset: int(0,127)?
+      invert_direction: bool?

@@ -1,4 +1,7 @@
-FROM python:3.12-slim
+ARG BUILD_FROM
+FROM $BUILD_FROM
+
+RUN apk add --no-cache python3 py3-pip
 
 WORKDIR /app
 
@@ -7,8 +10,7 @@ COPY src/ src/
 
 RUN pip install --no-cache-dir .
 
-RUN mkdir -p /data
-COPY config.yaml /data/config.yaml
-ENV CONFIG_PATH=/data/config.yaml
+COPY run.sh /run.sh
+RUN chmod a+x /run.sh
 
-CMD ["sh", "-c", "shutter-control \"$CONFIG_PATH\""]
+CMD ["/run.sh"]
