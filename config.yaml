@@ -1,5 +1,5 @@
 name: "Shutter Control"
-version: "1.0.2"
+version: "1.0.3"
 slug: "shutter_control"
 description: "EnOcean-to-MQTT bridge for Eltako FSB61NP-230V roller shutters"
 url: "https://github.com/morrisjobke/shutter-control"
