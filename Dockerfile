@@ -10,7 +10,5 @@ COPY src/ src/
 
 RUN pip install --no-cache-dir --break-system-packages .
 
-COPY run.sh /run.sh
-RUN chmod a+x /run.sh
-
-CMD ["/run.sh"]
+COPY run.sh /etc/services.d/shutter_control/run
+RUN chmod a+x /etc/services.d/shutter_control/run
