@@ -26,7 +26,7 @@ EnOcean-to-MQTT bridge for **Eltako FSB61NP-230V** roller shutter actuators, des
 
 ### Option A: Home Assistant Add-On (recommended)
 
-1. In Home Assistant go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**.
+1. In Home Assistant go to **Settings → Apps → Install App → ⋮ → Repositories**.
 2. Add `https://github.com/morrisjobke/shutter-control` and click **Add**.
 3. Find **Shutter Control** in the store and click **Install**.
 4. Open the add-on's **Configuration** tab and fill in your settings (see [Configuration](#configuration) below).
