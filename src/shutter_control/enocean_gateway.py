@@ -62,6 +62,10 @@ class StatusEvent:
         return f"StatusEvent({self.sender_id}, dir={self.direction}, stopped={self.stopped})"
 
 
+_KEEPALIVE_INTERVAL = 60.0   # seconds between keepalive pings
+_SILENCE_TIMEOUT = 30.0      # seconds without response after a send → reconnect
+
+
 class EnOceanGateway:
     def __init__(self, port: str):
         self._port = port
@@ -73,6 +77,8 @@ class EnOceanGateway:
         self._send_queue: queue.Queue[Packet | None] = queue.Queue()
         self._send_thread: threading.Thread | None = None
         self._running = False
+        self._last_sent_time: float = 0.0
+        self._last_received_time: float = 0.0
 
     @property
     def base_id(self) -> list[int] | None:
@@ -127,6 +133,9 @@ class EnOceanGateway:
                     with self._communicator_lock:
                         self._communicator = comm
                         self._base_id = base_id
+                    now = time.monotonic()
+                    self._last_sent_time = now
+                    self._last_received_time = now
                     logger.info("EnOcean base ID: %s", _format_id(base_id))
                     return True
             logger.error("Could not read EnOcean base ID after 5 seconds")
@@ -283,6 +292,7 @@ class EnOceanGateway:
             try:
                 packet = self._send_queue.get(timeout=1.0)
             except queue.Empty:
+                self._maybe_send_keepalive()
                 continue
             if packet is None:
                 break
@@ -290,9 +300,21 @@ class EnOceanGateway:
                 comm = self._communicator
             if comm and comm.is_alive():
                 comm.send(packet)
+                self._last_sent_time = time.monotonic()
             else:
                 logger.warning("Cannot send packet: communicator not ready, dropping")
             time.sleep(0.2)
+
+    def _maybe_send_keepalive(self) -> None:
+        """Send a CO_RD_IDBASE ping if the dongle has been idle too long."""
+        if time.monotonic() - self._last_sent_time < _KEEPALIVE_INTERVAL:
+            return
+        with self._communicator_lock:
+            comm = self._communicator
+        if comm and comm.is_alive():
+            comm.send(Packet(PACKET.COMMON_COMMAND, data=[0x08]))
+            self._last_sent_time = time.monotonic()
+            logger.debug("Sent keepalive ping to EnOcean dongle")
 
     def _receive_loop(self) -> None:
         """Process incoming EnOcean packets. Reconnects if the communicator dies."""
@@ -302,10 +324,24 @@ class EnOceanGateway:
             if not comm or not comm.is_alive():
                 self._reconnect()
                 continue
+
+            # Detect a silent dongle: sent something but no response for too long.
+            # Covers USB autosuspend and dongle firmware hangs where is_alive() stays True.
+            if (self._last_sent_time > self._last_received_time
+                    and time.monotonic() - self._last_sent_time > _SILENCE_TIMEOUT):
+                logger.warning(
+                    "EnOcean dongle silent for %.0fs after last send — forcing reconnect",
+                    time.monotonic() - self._last_sent_time,
+                )
+                self._reconnect()
+                continue
+
             try:
                 packet = comm.receive.get(timeout=1.0)
             except Exception:
                 continue
+
+            self._last_received_time = time.monotonic()
 
             if packet.packet_type != PACKET.RADIO:
                 continue
