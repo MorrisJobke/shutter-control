@@ -66,6 +66,7 @@ class EnOceanGateway:
     def __init__(self, port: str):
         self._port = port
         self._communicator: SerialCommunicator | None = None
+        self._communicator_lock = threading.Lock()
         self._base_id: list[int] | None = None
         self._on_status: Callable[[StatusEvent], None] | None = None
         self._receive_thread: threading.Thread | None = None
@@ -82,25 +83,11 @@ class EnOceanGateway:
 
     def start(self) -> None:
         logger.info("Starting EnOcean gateway on %s", self._port)
-        self._communicator = SerialCommunicator(port=self._port)
-        self._communicator.start()
-
-        # Wait for the communicator to read the base ID from the dongle
-        for attempt in range(10):
-            time.sleep(0.5)
-            if not self._communicator.is_alive():
-                raise RuntimeError(
-                    f"EnOcean communicator died — is another process using {self._port}? "
-                    "Check if the HA EnOcean integration is active."
-                )
-            self._base_id = self._communicator.base_id
-            if self._base_id:
-                break
-
-        if self._base_id:
-            logger.info("EnOcean base ID: %s", _format_id(self._base_id))
-        else:
-            raise RuntimeError("Could not read EnOcean base ID after 5 seconds")
+        if not self._start_communicator():
+            raise RuntimeError(
+                f"Could not start EnOcean communicator on {self._port} — "
+                "is another process (e.g. HA EnOcean integration) using the port?"
+            )
 
         self._running = True
         self._send_thread = threading.Thread(
@@ -118,8 +105,55 @@ class EnOceanGateway:
         self._send_queue.put(None)
         if self._send_thread:
             self._send_thread.join(timeout=5.0)
-        if self._communicator:
-            self._communicator.stop()
+        with self._communicator_lock:
+            if self._communicator:
+                self._communicator.stop()
+
+    def _start_communicator(self) -> bool:
+        """Start a fresh SerialCommunicator and wait for the base ID.
+
+        Replaces self._communicator under the lock. Returns True on success.
+        """
+        try:
+            comm = SerialCommunicator(port=self._port)
+            comm.start()
+            for _ in range(10):
+                time.sleep(0.5)
+                if not comm.is_alive():
+                    logger.error("EnOcean communicator died immediately on (re)connect")
+                    return False
+                base_id = comm.base_id
+                if base_id:
+                    with self._communicator_lock:
+                        self._communicator = comm
+                        self._base_id = base_id
+                    logger.info("EnOcean base ID: %s", _format_id(base_id))
+                    return True
+            logger.error("Could not read EnOcean base ID after 5 seconds")
+            comm.stop()
+            return False
+        except Exception:
+            logger.exception("Exception while (re)starting EnOcean communicator")
+            return False
+
+    def _reconnect(self) -> None:
+        """Called when the communicator thread has died. Retries until success."""
+        logger.warning("EnOcean communicator died — reconnecting")
+        with self._communicator_lock:
+            old = self._communicator
+            self._communicator = None
+        if old is not None:
+            try:
+                old.stop()
+            except Exception:
+                pass
+        delay = 5.0
+        while self._running:
+            if self._start_communicator():
+                return
+            logger.warning("Reconnect failed, retrying in %.0fs", delay)
+            time.sleep(delay)
+            delay = min(delay * 2, 60.0)
 
     def _sender_with_offset(self, offset: int) -> list[int]:
         """Return base_id + offset as a 4-byte sender address."""
@@ -252,14 +286,24 @@ class EnOceanGateway:
                 continue
             if packet is None:
                 break
-            self._communicator.send(packet)
+            with self._communicator_lock:
+                comm = self._communicator
+            if comm and comm.is_alive():
+                comm.send(packet)
+            else:
+                logger.warning("Cannot send packet: communicator not ready, dropping")
             time.sleep(0.2)
 
     def _receive_loop(self) -> None:
-        """Process incoming EnOcean packets."""
-        while self._running and self._communicator and self._communicator.is_alive():
+        """Process incoming EnOcean packets. Reconnects if the communicator dies."""
+        while self._running:
+            with self._communicator_lock:
+                comm = self._communicator
+            if not comm or not comm.is_alive():
+                self._reconnect()
+                continue
             try:
-                packet = self._communicator.receive.get(timeout=1.0)
+                packet = comm.receive.get(timeout=1.0)
             except Exception:
                 continue
 
